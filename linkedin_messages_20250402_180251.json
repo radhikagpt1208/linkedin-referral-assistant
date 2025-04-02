@@ -1,0 +1,132 @@
+[
+  {
+    "sender": "Manpriya Batra",
+    "timestamp": "2:16 PM",
+    "preview": "Manpriya: Can you refer me for the same?",
+    "messages": [
+      {
+        "content": "Hi radhika"
+      },
+      {
+        "content": "Hi Manpriya "
+      },
+      {
+        "content": "How are you"
+      },
+      {
+        "content": "All good"
+      },
+      {
+        "content": "I am interested in a developer role at adobe"
+      },
+      {
+        "content": "Can you refer me for the same?"
+      }
+    ]
+  },
+  {
+    "sender": "Akhil Sambaraju",
+    "timestamp": "Mar 30",
+    "preview": "",
+    "messages": [
+      {
+        "content": "Hi Radhika,\nThanks for connecting,\nI have a few questions about Adobe. Can you please spare a few minutes."
+      }
+    ]
+  },
+  {
+    "sender": "Naman Kumar",
+    "timestamp": "Mar 20",
+    "preview": "Naman: Hey Radhika, hope you are doing well. Wanted to know if adobe is hiring sde 1",
+    "messages": [
+      {
+        "content": "Hey congratulations on getting two offers really happy for you, can you please tell how did you manage to get international offer"
+      },
+      {
+        "content": "Hi, Naman. Thank you.\nFor the J.P. Morgan, Glasgow opportunity, I directly applied on their careers page when there was a job opening. After that, it was a usual process like any other company. "
+      },
+      {
+        "content": "Ok and if you are not taking that role can you please divert them to me if possible, its a huge huge request"
+      },
+      {
+        "content": "I’m not sure I can do that. All the formalities like VISA and other relevant documents has been completed for all the candidates. We’ve been assigned managers already. So I think all the processes have been completed. "
+      },
+      {
+        "content": "Okk please lemme know of some other opportunities, i do search at career sites and apply a lot but not getting any interview calls"
+      },
+      {
+        "content": "Sure, I’ll let you know if I come across any openings. "
+      },
+      {
+        "content": "Hey, if you’re still interested in JP Morgan openings, you can apply here: https://jpmc.fa.oraclecloud.com/hcmUI/CandidateExperience/en/sites/CX_1001/job/210411198"
+      },
+      {
+        "content": "I have applied for almost 5.openings in past week but all got rejected"
+      },
+      {
+        "content": "😞"
+      },
+      {
+        "content": "Itna market kyu kharab hai ma'am!!"
+      },
+      {
+        "content": "Hey Radhika, hope you are doing well.\nWanted to know if adobe is hiring sde 1"
+      }
+    ]
+  },
+  {
+    "sender": "RAJ KUMAR",
+    "timestamp": "Feb 20",
+    "preview": " RAJ sent an attachment",
+    "messages": [
+      {
+        "content": "Dear Radhika,\n\nI hope you’re doing well. I am a third-year Computer Science student at Maharishi Markandeshwar University and am interested in applying for the 2025 Software Engineer Intern (Job ID: R147746) position at Adobe.\n\nWith experience in Java, JavaScript, Python, and full-stack development, I have interned at Edunet Foundation, working on AI-based solutions, and served as a Teaching Assistant at Coding Ninjas, mentoring over 1,600 students. My problem-solving abilities are demonstrated by 650+ solved LeetCode problems and my recognition as a LinkedIn Top Voice in Systems Design for my insights on scalable solutions.\n\nI would greatly appreciate your referral for this opportunity. Please let me know if you’d be open to supporting my application. I’d be happy to share my resume or any additional details.\n\nBest regards,\nRaj Kumar\nEmail: raj.kumarcse58@gmail.com",
+        "emails": [
+          "raj.kumarcse58@gmail.com"
+        ]
+      }
+    ]
+  },
+  {
+    "sender": "Ritik Pandey",
+    "timestamp": "Feb 15",
+    "preview": "Ritik: Congrats on the promotion!",
+    "messages": [
+      {
+        "content": "Congrats on your 1 year anniversary at Adobe!"
+      },
+      {
+        "content": "Congrats on the promotion!"
+      }
+    ]
+  },
+  {
+    "sender": "Jeel Tolia",
+    "timestamp": "Feb 11",
+    "preview": "Jeel: Job Referral at Adobe (JobId: R153475, R152782) I hope you’re doing well! I’m reaching out because I noticed an opportunity at Adobe that aligns well with my skills and experience, particularly my recent work at Goldman Sachs. I kindly request you to please refer me for the job opportunity. Resume: https://drive.google.com/file/d/1LisTb2isHF2oUxATZgpoZOReLxRlgFz-/view Thanks, Jeel",
+    "messages": [
+      {
+        "content": "Job Referral at Adobe (JobId: R153475, R152782)\n\nI hope you’re doing well! I’m reaching out because I noticed an opportunity at Adobe that aligns well with my skills and experience, particularly my recent work at Goldman Sachs.\n\nI kindly request you to please refer me for the job opportunity.\n\nResume: https://drive.google.com/file/d/1LisTb2isHF2oUxATZgpoZOReLxRlgFz-/view\n\nThanks,\nJeel"
+      }
+    ]
+  },
+  {
+    "sender": "ROHIT SHARMA",
+    "timestamp": "Feb 9",
+    "preview": "ROHIT: How are you doing?",
+    "messages": [
+      {
+        "content": "Congrats on the promotion!"
+      },
+      {
+        "content": "Thanks, Rohit! "
+      },
+      {
+        "content": "You're welcome"
+      },
+      {
+        "content": "How are you doing?"
+      }
+    ]
+  }
+]
