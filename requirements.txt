@@ -1,7 +1,13 @@
-playwright==1.31.1
-requests==2.28.2
-pandas==1.5.3
-openpyxl==3.1.2
-PyPDF2==3.0.1
-openai>=1.6.0
-greenlet>=3.0.0 
+# Core dependencies
+playwright==1.40.0  # Web automation library with better dependency handling
+requests==2.28.2    # HTTP client for API requests
+
+# Data processing
+pandas==1.5.3       # Data manipulation and analysis
+openpyxl==3.1.2     # Excel file support for pandas
+
+# PDF processing
+PyPDF2==3.0.1       # PDF text extraction
+
+# AI integration
+openai>=1.6.0       # Azure OpenAI integration 

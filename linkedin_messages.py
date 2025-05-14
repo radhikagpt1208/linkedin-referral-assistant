@@ -73,13 +73,23 @@ def is_referral_request(message_content):
         "position", "role", "job posting", "job opening", "recommend me", "recommendation",
         "looking for a job", "job search", "openings", "hiring", "job opportunity",
         "internal referral", "company referral", "forwarding my resume", "forwarding my cv",
-        "attached resume", "attached cv", "resume attached", "cv attached", "apply for"
+        "attached resume", "attached cv", "resume attached", "cv attached", "apply for",
+        "job id", "job reference", "refer", "would appreciate a referral", "requesting a referral",
+        "kindly refer", "please refer", "seeking a referral", "job referral", "application process",
+        "help with referral", "refer my profile", "refer my application", "refer my resume",
+        "LinkedIn job", "request you to refer", "job consideration", "open position", "open role",
+        "open requisition", "req id", "requisition"
     ]
     
     if not message_content:
         return False
     
     message_lower = message_content.lower()
+    
+    # Check for job ID patterns (common in referral requests)
+    job_id_pattern = re.search(r'job\s*id\s*[:#]?\s*([a-z]\d+)', message_lower, re.IGNORECASE)
+    if job_id_pattern:
+        return True
     
     # Check for referral keywords
     for keyword in referral_keywords:
@@ -154,6 +164,7 @@ def download_file(url, browser_context, destination_folder, filename):
 
 def extract_message_content(page, conversation_info, browser_context):
     """Extract message content from an opened conversation."""
+    print("  🔄 Extracting message content...")
     full_messages = []
     message_items = page.query_selector_all('.msg-s-message-list__event')
     
@@ -161,7 +172,13 @@ def extract_message_content(page, conversation_info, browser_context):
     if not os.path.exists(RESUMES_DIR):
         os.makedirs(RESUMES_DIR)
     
-    sender_name = conversation_info.get('sender', 'Unknown').replace(' ', '_')
+    # Get the name from the conversation info, but also try to find the real name in the message
+    display_name = conversation_info.get('sender', 'Unknown')
+    sender_name = display_name.replace(' ', '_')
+    
+    # Check if we can find the signature or a more accurate name in the message content
+    # We'll collect this during message analysis
+    actual_name = None
     is_potential_referral = False
     all_message_content = ""
     has_attachments = False
@@ -169,6 +186,7 @@ def extract_message_content(page, conversation_info, browser_context):
     drive_links = []
     
     # First pass to collect all message content for analysis
+    print(f"  📃 Analyzing message text to identify referral request...")
     for item in message_items:
         body = item.query_selector('.msg-s-event-listitem__body')
         if body:
@@ -180,10 +198,43 @@ def extract_message_content(page, conversation_info, browser_context):
             if links:
                 has_drive_links = True
                 drive_links.extend(links)
+                print(f"  🔍 Found Google Drive link in message")
                 
         # Check if message has attachments
         if item.query_selector_all('.msg-s-event-listitem__attachment-item'):
             has_attachments = True
+            print(f"  🔍 Found attachment in message")
+    
+    # Try to extract actual name from message (look for signature patterns)
+    signature_patterns = [
+        r'(?:Regards|Sincerely|Thanks|Thank you|Best|Cheers|Best regards),?\s*\n*([A-Z][a-z]+(?: [A-Z][a-z]+)*)',
+        r'(?:name is|this is)\s*([A-Z][a-z]+(?: [A-Z][a-z]+)*)',
+        r'(?:^|\n)([A-Z][a-z]+(?: [A-Z][a-z]+)*)\s*$',  # Name at the end of message or line
+        r'Dear\s+[A-Za-z\.]+,\s*\n+.*\n+.*(?:Regards|Sincerely|Thanks|Thank you|Best),?\s*\n*([A-Z][a-z]+(?: [A-Z][a-z]+)*)'  # Common email format with closing
+    ]
+    
+    for pattern in signature_patterns:
+        name_match = re.search(pattern, all_message_content)
+        if name_match:
+            actual_name = name_match.group(1).strip()
+            if 2 <= len(actual_name.split()) <= 3:  # Likely a real name with 2-3 words
+                # Check if this name is different from the display name
+                if actual_name.lower() != display_name.lower():
+                    print(f"  📝 Found different signature name in message: {actual_name}")
+                else:
+                    print(f"  📝 Found matching signature name in message: {actual_name}")
+                break
+    
+    # If found a better name in the message, use it
+    if actual_name:
+        if actual_name.lower() != display_name.lower():
+            sender_name = actual_name.replace(' ', '_')
+            print(f"  ✏️ Using message signature name: {sender_name} (different from conversation contact)")
+        else:
+            sender_name = actual_name.replace(' ', '_')
+            print(f"  ✏️ Using message signature name: {sender_name} (matches conversation contact)")
+    else:
+        print(f"  ✏️ Using conversation contact name: {display_name}")
     
     # Determine if this is a referral request
     is_potential_referral = is_referral_request(all_message_content)
@@ -191,6 +242,7 @@ def extract_message_content(page, conversation_info, browser_context):
     # If this is a referral request with Google Drive links, try to download them
     resume_downloaded = False
     if is_potential_referral and drive_links:
+        print(f"  📥 Attempting to download resume from Google Drive...")
         for i, drive_link in enumerate(drive_links):
             clean_filename = f"{sender_name}_resume.pdf"
             # If multiple drive links, add a number suffix only for the 2nd onward
@@ -200,8 +252,12 @@ def extract_message_content(page, conversation_info, browser_context):
             result = download_from_google_drive(drive_link, RESUMES_DIR, clean_filename)
             if result.get("success"):
                 resume_downloaded = True
+                print(f"  ✅ Successfully downloaded resume: {clean_filename}")
+            else:
+                print(f"  ❌ Failed to download from Google Drive: {result.get('error', 'Unknown error')}")
     
     # Process each message item
+    attachments_processed = False
     for item_index, item in enumerate(message_items):
         message_info = {}
         
@@ -229,18 +285,21 @@ def extract_message_content(page, conversation_info, browser_context):
                     message_info["emails"] = emails
         
         # Check for file attachments only if this looks like a referral request
-        if is_potential_referral:
+        if is_potential_referral and not attachments_processed:
             attachments = item.query_selector_all('.msg-s-event-listitem__attachment-item')
             if attachments:
+                print(f"  📎 Found {len(attachments)} attachment(s) in message")
                 message_attachments = []
                 downloaded_attachments = []
-                for attachment in attachments:
+                for att_index, attachment in enumerate(attachments):
                     try:
                         # Look for the link with href containing "/dms/"
                         download_link = attachment.query_selector('a[href*="/dms/"]')
                         if download_link:
                             attachment_url = download_link.get_attribute('href')
                             attachment_name = download_link.get_attribute('download') or "resume.pdf"
+                            
+                            print(f"  📥 Attempting to download attachment {att_index+1}: {attachment_name}")
                             
                             # If it appears to be a resume, save it with the sender's name
                             resume_keywords = ["resume", "cv", "curriculum", "vitae"]
@@ -271,9 +330,12 @@ def extract_message_content(page, conversation_info, browser_context):
                                     })
                                     downloaded_attachments.append(clean_filename)
                                     resume_downloaded = True
+                                    print(f"  ✅ Successfully downloaded resume: {clean_filename}")
+                                else:
+                                    print(f"  ❌ Failed to download attachment: {download_result.get('error', 'Unknown error')}")
                             
                     except Exception as e:
-                        print(f"Error processing attachment: {str(e)}")
+                        print(f"  ❌ Error processing attachment: {str(e)}")
                 
                 if message_attachments:
                     message_info["attachments"] = message_attachments
@@ -281,6 +343,7 @@ def extract_message_content(page, conversation_info, browser_context):
                 # Add a summary of downloaded attachments to the message
                 if downloaded_attachments:
                     message_info["attachment_downloaded"] = ", ".join(downloaded_attachments)
+                    attachments_processed = True
         
         if message_info:
             full_messages.append(message_info)
@@ -290,6 +353,10 @@ def extract_message_content(page, conversation_info, browser_context):
     
     # Add resume download status
     conversation_info["has_resume_downloaded"] = resume_downloaded
+    
+    # Add the actual name we found to the conversation info
+    if actual_name:
+        conversation_info["actual_name"] = actual_name
     
     # Explicitly add Google Drive links to the conversation info
     if drive_links:
@@ -322,8 +389,8 @@ def get_linkedin_messages(profile_path=None):
             
             # Check if the profile path exists
             if not profile_path or not os.path.exists(profile_path):
-                print(f"Warning: Profile path '{profile_path}' does not exist or was not provided.")
-                print("Launching browser without a profile. You will need to login manually.")
+                print(f"⚠️ Profile path '{profile_path}' does not exist or was not provided.")
+                print("⚠️ Starting new browser session. You will need to login manually.")
                 browser = p.chromium.launch(headless=False, args=browser_args)
                 context = browser.new_context(
                     accept_downloads=True,
@@ -332,7 +399,7 @@ def get_linkedin_messages(profile_path=None):
                 )
                 page = context.new_page()
             else:
-                print(f"Launching browser with profile: {profile_path}")
+                print(f"🔐 Using existing profile: {profile_path}")
                 browser_context = p.chromium.launch_persistent_context(
                     user_data_dir=profile_path,
                     headless=False,
@@ -356,51 +423,183 @@ def get_linkedin_messages(profile_path=None):
             page.set_default_timeout(120000)  # 2 minutes
             
             # Check login status first
-            print("Opening LinkedIn...")
+            print("Opening LinkedIn to check login status...")
             page.goto('https://www.linkedin.com/')
             
             if page.url.startswith('https://www.linkedin.com/login'):
-                print("Login required. Please sign in manually in the browser window.")
+                print("-----------------------------------------------------")
+                print("LinkedIn login required! Please sign in manually in the browser window.")
                 print("If you need to complete 2FA, you have up to 5 minutes to complete the process.")
+                print("-----------------------------------------------------")
+                
+                # Wait for login to complete
                 page.wait_for_url('https://www.linkedin.com/feed/', timeout=300000)  # 5 minutes for login + 2FA
-                print("Login successful!")
+                print("✅ Login completed successfully!")
+            else:
+                print("✅ Already logged in to LinkedIn")
             
             # Navigate to messaging
-            print("Opening LinkedIn messaging...")
+            print("Navigating to LinkedIn messaging...")
             page.goto('https://www.linkedin.com/messaging/')
             
             # Wait for the messages list to load
-            print("Waiting for messages to load...")
+            print("⏳ Waiting for LinkedIn messages to load...")
             page.wait_for_selector('.msg-conversations-container__conversations-list', timeout=120000)  # 2 minutes
             page.wait_for_timeout(5000)  # Give more time for dynamic content
             
-            # Focus on unread conversations
-            unread_conversations = page.query_selector_all('.msg-conversation-card__convo-item-container--unread')
-            print(f"Found {len(unread_conversations)} unread conversations")
+            # First, count visible conversations
+            conversations = page.query_selector_all('.msg-conversation-listitem__link')
+            print(f"📨 Initially found {len(conversations)} conversations visible")
             
+            # Define target count before using it
+            target_count = 15  # We want to check at least 15 messages
+            
+            # Scroll to load more conversations, to ensure we check at least 15 messages
+            print(f"⏬ Scrolling to load at least {target_count} conversations to check for unread messages...")
+            conversation_list = page.query_selector('.msg-conversations-container__conversations-list')
+            max_scroll_attempts = 10
+            scroll_attempts = 0
+            
+            # Track conversations we've already seen to ensure we're loading new ones
+            current_conversation_count = len(conversations)
+            last_conversation_count = 0
+            
+            while len(conversations) < target_count and scroll_attempts < max_scroll_attempts:
+                last_conversation_count = len(conversations)
+                print(f"Scroll attempt {scroll_attempts+1}: Currently have {last_conversation_count} conversations")
+                
+                # Scroll incrementally rather than all the way to the bottom
+                if conversation_list:
+                    # Simple scroll down by 300px
+                    page.evaluate("element => { element.scrollTop += 300; }", conversation_list)
+                else:
+                    # Fallback scrolling if we can't get the conversation list element
+                    page.keyboard.press('PageDown')
+                
+                # Wait for new items to load
+                page.wait_for_timeout(2000)
+                
+                # Count conversations again
+                conversations = page.query_selector_all('.msg-conversation-listitem__link')
+                current_conversation_count = len(conversations)
+                print(f"After scrolling: found {current_conversation_count} conversations")
+                
+                # Check if we've loaded new conversations
+                if current_conversation_count <= last_conversation_count:
+                    print("No new conversations loaded, waiting longer...")
+                    page.wait_for_timeout(2000)  # Wait a bit longer
+                    
+                    # Try one more time
+                    conversations = page.query_selector_all('.msg-conversation-listitem__link')
+                    current_conversation_count = len(conversations)
+                    
+                    # If still no new conversations, we may have reached the end
+                    if current_conversation_count <= last_conversation_count:
+                        print("Still no new conversations. We may have reached the end of the list.")
+                        # Try one final larger scroll
+                        if conversation_list:
+                            page.evaluate("element => { element.scrollTop += 800; }", conversation_list)
+                        page.wait_for_timeout(3000)
+                        conversations = page.query_selector_all('.msg-conversation-listitem__link')
+                        if len(conversations) <= last_conversation_count:
+                            print("No more conversations to load. Breaking out of scroll loop.")
+                            break
+                
+                scroll_attempts += 1
+            
+            # Now check all loaded conversations for unread status
             unread_messages = []
+            unread_conversation_elements = []
+            
+            # Find all conversations with unread status
+            for convo in conversations:
+                # Check if this conversation is unread
+                is_unread = convo.query_selector('.msg-conversation-card__unread-count') is not None
+                
+                if is_unread:
+                    unread_conversation_elements.append(convo)
+            
+            print(f"🔍 Found {len(unread_conversation_elements)} unread conversations out of {len(conversations)} total loaded")
+            print("=" * 50)
             
             # Process each unread conversation
-            for i, convo in enumerate(unread_conversations):
+            if len(unread_conversation_elements) > 0:
+                print("📝 Processing only the unread conversations...")
+            else:
+                print("ℹ️ No unread conversations found.")
+            
+            for i, convo in enumerate(unread_conversation_elements):
                 try:
-                    # Get basic conversation info
-                    convo_info = extract_basic_conversation_info(convo)
-                    print(f"Processing conversation {i+1} from: {convo_info['sender']}")
+                    print("\n" + "=" * 50)
+                    print(f"CONVERSATION {i+1}/{len(unread_conversation_elements)}")
+                    print("=" * 50)
+                    
+                    # Get basic conversation info by examining the container
+                    container = convo.evaluate("(element) => element.closest('.msg-conversation-card')")
+                    if not container:
+                        container = convo
+                    
+                    # Extract sender name and other info
+                    sender_elem = page.query_selector_all('.msg-conversation-listitem__participant-names')[i]
+                    sender_name = "Unknown"
+                    if sender_elem:
+                        name_span = sender_elem.query_selector('span.truncate')
+                        if name_span:
+                            sender_name = name_span.inner_text()
+                        else:
+                            sender_name = sender_elem.inner_text()
+                    
+                    preview = page.query_selector_all('.msg-conversation-card__message-snippet')[i] if i < len(page.query_selector_all('.msg-conversation-card__message-snippet')) else None
+                    preview_text = preview.inner_text() if preview else ""
+                    
+                    convo_info = {
+                        "sender": sender_name,
+                        "preview": preview_text
+                    }
+                    
+                    print(f"Opening conversation from LinkedIn contact: {convo_info['sender']}")
                     
                     # Click to open the conversation
-                    clickable = convo.query_selector('.msg-conversation-listitem__link')
-                    if clickable:
-                        clickable.click()
-                        page.wait_for_selector('.msg-s-message-list__event', timeout=30000)  # 30 seconds
-                        page.wait_for_timeout(3000)
+                    convo.click()
+                    print(f"  → Opening conversation...")
+                    page.wait_for_selector('.msg-s-message-list__event', timeout=30000)  # 30 seconds
+                    page.wait_for_timeout(3000)
+                    
+                    # Extract message content and add to results
+                    current_browser = browser_context if browser_context else context
+                    message_data = extract_message_content(page, convo_info, current_browser)
+                    
+                    # Only add to unread_messages if it's a potential referral request
+                    if message_data.get("is_potential_referral", False):
+                        print(f"  ✅ Identified as a REFERRAL REQUEST")
                         
-                        # Extract message content and add to results
-                        current_browser = browser_context if browser_context else context
-                        message_data = extract_message_content(page, convo_info, current_browser)
+                        # If we found an actual name different from the conversation name, make it clear
+                        if message_data.get("actual_name") and message_data.get("actual_name") != convo_info["sender"]:
+                            print(f"  ℹ️ Note: This appears to be a message from {message_data.get('actual_name')} sent through {convo_info['sender']}'s conversation")
+                        
+                        # Check if resume was found
+                        if message_data.get("has_resume_downloaded", False):
+                            print(f"  ✅ Resume found and downloaded")
+                            
+                            # Show if it was from Google Drive or attachment
+                            if message_data.get("google_drive_links"):
+                                print(f"  📥 Downloaded from Google Drive: {message_data['google_drive_links'][0]}")
+                            else:
+                                print(f"  📎 Downloaded from message attachment")
+                            
+                            print("  📊 Resume will be added to Excel report")
+                        else:
+                            print(f"  ❌ No resume found for this referral request")
+                            
                         unread_messages.append(message_data)
-                        
+                    else:
+                        print(f"  ❌ Not a referral request - skipping")
+                    
+                    print("-" * 50)
+                    
                 except Exception as e:
-                    print(f"Error processing conversation {i+1}: {str(e)}")
+                    print(f"  ❌ Error processing conversation {i+1}: {str(e)}")
+                    print("-" * 50)
                     continue
             
             # Return unread messages

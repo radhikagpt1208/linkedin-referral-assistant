@@ -94,8 +94,9 @@ def check_resume_with_gpt(message_content):
     
     return call_gpt_api(prompt, "You are an assistant that analyzes whether LinkedIn messages have resume attachments or links. Return only valid JSON.", default_key="has_resume")
 
-def extract_info_from_resume_with_gpt(text):
+def extract_info_from_resume_with_gpt(text, filename=""):
     """Extract only the required info from resume text with GPT."""
+    print(f"Extracting info from resume: {filename}")
     prompt = f"""
     Extract ONLY the following information from this resume:
     1. Full name
@@ -103,19 +104,35 @@ def extract_info_from_resume_with_gpt(text):
     3. Phone number
     4. Total years of work experience (calculate this based on work history)
     
+    For calculating years of experience:
+    - Sum the total time (in years) across all professional work experiences
+    - For current positions, calculate time from start date until present
+    - For past positions, calculate time from start date to end date
+    - Round to the nearest quarter (0.25, 0.5, 0.75, 1.0)
+    - Do NOT include internships, volunteering, or educational experiences unless they were full-time paid professional roles
+    - For overlapping time periods, do not double-count the overlapping time
+    - If exact dates aren't provided, make a reasonable estimation based on the information available
+    - Be consistent: if you calculate 1 year and 2 months, that should be 1.25 years
+    
     Return the information in a structured JSON format with these fields:
     {{
         "name": "Full Name",
         "email": "email@example.com",
         "phone": "+1234567890",
-        "years_of_experience": 5
+        "years_of_experience": 5.25
     }}
     
     Resume:
     {text}
     """
     
-    return call_gpt_api(prompt, "You are an assistant that extracts specific information from resumes. Return only valid JSON.", default_key="success")
+    result = call_gpt_api(prompt, "You are an assistant that extracts specific information from resumes. Return only valid JSON.", default_key="success")
+    
+    # If we got a name back, log it
+    if "name" in result and result["name"]:
+        print(f"✅ Extracted name from resume: {result['name']}")
+    
+    return result
 
 def call_gpt_api(prompt, system_content, default_key="is_referral_request"):
     """Generic function to call GPT API and handle responses."""
@@ -126,7 +143,7 @@ def call_gpt_api(prompt, system_content, default_key="is_referral_request"):
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.3
+            temperature=0.1  # Lower temperature for more consistent results
         )
         
         result = response.choices[0].message.content.strip()
@@ -243,7 +260,7 @@ def process_resume(message, resume_filename, sender_name, job_id, analysis):
                     # Extract text and analyze resume
                     resume_text = extract_text_from_pdf(resume_path)
                     if resume_text:
-                        resume_info = extract_info_from_resume_with_gpt(resume_text)
+                        resume_info = extract_info_from_resume_with_gpt(resume_text, resume_filename)
                     break
     
     # Check for Google Drive links if no attachment was processed
@@ -263,7 +280,7 @@ def process_resume(message, resume_filename, sender_name, job_id, analysis):
                 # Extract text and analyze resume
                 resume_text = extract_text_from_pdf(resume_path)
                 if resume_text:
-                    resume_info = extract_info_from_resume_with_gpt(resume_text)
+                    resume_info = extract_info_from_resume_with_gpt(resume_text, resume_filename)
     
     # If we successfully processed a resume, prepare referral data
     if resume_saved and resume_info:
@@ -281,12 +298,15 @@ def process_resume(message, resume_filename, sender_name, job_id, analysis):
     
     return None
 
-def analyze_resume_with_gpt(resume_text, sender_name, message_content=""):
+def analyze_resume_with_gpt(resume_text, sender_name, message_content="", filename=""):
     """
     Use Azure OpenAI to analyze resume text and extract key information.
     Returns a dictionary with name, email, phone, years of experience, and job ID.
     """
     try:
+        # Print the filename we're analyzing
+        print(f"Analyzing resume file: {filename}")
+        
         # Truncate if resume is too long
         if len(resume_text) > 10000:
             resume_text = resume_text[:10000] + "..."
@@ -307,6 +327,16 @@ def analyze_resume_with_gpt(resume_text, sender_name, message_content=""):
         2. Email address
         3. Phone number
         4. Total years of work experience (calculate based on work history)
+        
+        For calculating years of experience:
+        - Sum the total time (in years) across all professional work experiences
+        - For current positions, calculate time from start date until present
+        - For past positions, calculate time from start date to end date
+        - Round to the nearest quarter (0.25, 0.5, 0.75, 1.0)
+        - Do NOT include internships, volunteering, or educational experiences unless they were full-time paid professional roles
+        - For overlapping time periods, do not double-count the overlapping time
+        - If exact dates aren't provided, make a reasonable estimation based on the information available
+        - Be consistent: if you calculate 1 year and 2 months, that should be 1.25 years
         
         Return ONLY a JSON object with these keys: name, email, phone, years_of_experience
         Make the response valid JSON with no additional text, no markdown formatting, no code blocks.
@@ -434,199 +464,232 @@ def analyze_resume_with_gpt(resume_text, sender_name, message_content=""):
         }
 
 def process_linkedin_messages():
-    """
-    Main function to process LinkedIn messages:
-    1. Read the most recent unread messages file
-    2. Analyze each message for job referral requests using GPT
-    3. Check if referral request has a resume
-    4. Save resume and extract key information
-    5. Update Excel with all the information
-    """
+    """Process LinkedIn messages with referral requests and resumes."""
     try:
-        # First check for unread message files created by linkedin_messages.py
-        unread_messages_files = sorted(glob.glob("linkedin_unread_messages_*.json"), reverse=True)
+        # Find the most recent referral messages file
+        messages_file = get_latest_file("linkedin_referrals")
+        if not messages_file:
+            print("No LinkedIn referral message files found.")
+            return False
         
-        # If no unread message files, check for any messages JSON files in the directory
-        if not unread_messages_files:
-            messages_files = sorted(glob.glob("*.json"), reverse=True)
-            # Filter to only include files that might contain LinkedIn messages
-            messages_files = [f for f in messages_files if "linkedin" in f.lower() or "message" in f.lower()]
-            if messages_files:
-                unread_messages_files = messages_files
-        
-        print(f"\nFound message files: {unread_messages_files}")
-        
-        # Check if we have resumes in the directory
+        # Find all resume files in the resumes directory
         resume_files = glob.glob(os.path.join(RESUMES_DIR, "*.pdf"))
         
+        if not resume_files:
+            print("No resume files found in the resumes directory.")
+            return False
+        
+        print(f"\nFound message files: {[messages_file]}")
         print(f"Found resume files: {resume_files}")
         
-        if not resume_files:
-            print(f"No resumes found in the {RESUMES_DIR} directory.")
-            return False
-    
-        # Get the most recent messages file if available
-        messages_data = []
+        # Load messages from file
+        print(f"\nReading messages from: {messages_file}")
+        with open(messages_file, 'r', encoding='utf-8') as f:
+            messages_data = json.load(f)
+        
+        print(f"Loaded {len(messages_data)} conversations from messages file")
+        
+        # Extract message content by sender for matching
         message_content_by_sender = {}
-    
-        if unread_messages_files:
-            latest_messages_file = unread_messages_files[0]
-            print(f"\nReading messages from: {latest_messages_file}")
-            try:
-                with open(latest_messages_file, 'r', encoding='utf-8') as f:
-                    messages_data = json.load(f)
-                
-                print(f"Loaded {len(messages_data)} conversations from messages file")
-                
-                # Debug the structure of the first message
-                if messages_data and len(messages_data) > 0:
-                    print("\nDEBUG - First message structure:")
-                    first_msg = messages_data[0]
-                    for key in first_msg:
-                        if key == "messages":
-                            print(f"  messages: Array with {len(first_msg['messages'])} items")
-                        else:
-                            print(f"  {key}: {first_msg[key]}")
-                
-                # Create a mapping of sender names to message content
-                for message in messages_data:
-                    sender = message.get("sender", "Unknown").replace(" ", "_")
-                    content = ""
-                    
-                    # Include the message subject/title if available
-                    if "subject" in message:
-                        subject = message["subject"]
-                        print(f"\nFound subject for {sender}: {subject}")
-                        content += subject + "\n\n"
-                    
-                    # Add all message content
-                    for msg in message.get("messages", []):
-                        if "content" in msg:
-                            content += msg["content"] + "\n"
-                    
-                    message_content_by_sender[sender] = content
-                    print(f"Extracted content for {sender}, length: {len(content)} chars")
-                    print(f"First 100 chars: {content[:100]}...")
-                    
-                # Debug: Print all available senders
-                print(f"\nAvailable senders in messages file: {list(message_content_by_sender.keys())}")
-            except (json.JSONDecodeError, FileNotFoundError) as e:
-                print(f"Could not read messages file: {str(e)}")
-        else:
-            print("\nWARNING: No message files found. Messages for job ID extraction not available.")
-            print("Will attempt to analyze resumes without job ID information.")
+        original_names = {}  # Map display names to actual names when available
         
-        # Create a list to store resume analyses
+        for msg in messages_data:
+            display_name = msg.get('sender', 'Unknown')
+            sender_key = display_name.replace(' ', '_')
+            
+            # Check if we found an actual name in the message
+            actual_name = msg.get('actual_name')
+            if actual_name:
+                # Use the actual name as the key instead
+                actual_key = actual_name.replace(' ', '_')
+                print(f"Using actual name '{actual_name}' instead of '{display_name}' for matching")
+                sender_key = actual_key
+                original_names[sender_key] = display_name  # Store mapping for later
+            
+            # Combine all message content from this sender
+            full_content = ""
+            for message in msg.get('messages', []):
+                content = message.get('content', '')
+                if content:
+                    full_content += content + "\n"
+            
+            if full_content:
+                message_content_by_sender[sender_key] = full_content
+        
+        # Debug first message structure
+        if messages_data:
+            first_msg = messages_data[0]
+            print("\nDEBUG - First message structure:")
+            print(f"  sender: {first_msg.get('sender', 'Unknown')}")
+            print(f"  preview: {first_msg.get('preview', 'No preview')}")
+            print(f"  is_potential_referral: {first_msg.get('is_potential_referral', False)}")
+            print(f"  has_resume_downloaded: {first_msg.get('has_resume_downloaded', False)}")
+            print(f"  messages: Array with {len(first_msg.get('messages', []))} items")
+        
+        # Extract and show available message content for debugging
+        for sender, content in message_content_by_sender.items():
+            print(f"Extracted content for {sender}, length: {len(content)} chars")
+            print(f"First 100 chars: {content[:100]}...")
+        
+        print(f"\nAvailable senders in messages file: {list(message_content_by_sender.keys())}")
+        
+        # Process only the resume files from referral requests
         analyses = []
-        
-        # Process each resume
         print(f"\nProcessing {len(resume_files)} resumes...")
-        for resume_file in resume_files:
-            file_name = os.path.basename(resume_file)
-            print(f"\n=====================================================")
-            print(f"Analyzing resume: {file_name}")
-            print(f"=====================================================")
+        
+        for i, resume_file in enumerate(resume_files):
+            print("\n" + "=" * 60)
+            print(f"RESUME ANALYSIS {i+1}/{len(resume_files)}")
+            print("=" * 60)
+            print(f"File: {os.path.basename(resume_file)}")
             
-            # Try different patterns to extract sender name from filename
-            sender_name = "Unknown"
-            # Pattern 1: Name_resume.pdf
-            pattern1 = re.match(r'(.+?)_resume\.pdf', file_name)
-            # Pattern 2: Name.pdf
-            pattern2 = re.match(r'(.+?)\.pdf', file_name)
+            # Extract sender name from filename (e.g., John_Smith_resume.pdf -> John_Smith)
+            file_basename = os.path.basename(resume_file)
             
-            if pattern1:
-                sender_name = pattern1.group(1)
-            elif pattern2:
-                sender_name = pattern2.group(1)
+            # Handle different possible filename patterns
+            if '_resume' in file_basename:
+                sender_name = file_basename.split('_resume')[0]
+            elif '_cv' in file_basename.lower():
+                sender_name = file_basename.split('_cv')[0]
+            else:
+                # Just remove the extension
+                sender_name = os.path.splitext(file_basename)[0]
+            
+            print(f"Extracted sender name from filename: {sender_name}")
+            
+            # Find the corresponding message content
+            message_content = None
+            print("-" * 40)
+            print("MESSAGE MATCHING")
+            print("-" * 40)
+            
+            # Try direct match first
+            if sender_name in message_content_by_sender:
+                message_content = message_content_by_sender[sender_name]
+                print(f"✓ Found direct match for message content with key: {sender_name}")
+            
+            # If no direct match, try partial match
+            if not message_content:
+                best_match = None
+                best_match_score = 0
                 
-            print(f"Extracted sender name: {sender_name}")
-            
-            # Get message content for this sender if available
-            message_content = message_content_by_sender.get(sender_name, "")
-            if message_content:
-                print(f"Found direct match for message content with key: {sender_name}")
-            
-            # If no match found, try case-insensitive match
-            if not message_content:
-                print("No direct match found, trying case-insensitive match...")
                 for key in message_content_by_sender.keys():
-                    if key.lower() == sender_name.lower():
-                        message_content = message_content_by_sender[key]
-                        print(f"Found message content using case-insensitive match: {key}")
-                        break
+                    # Compare by cleaning up both names and checking partial matches
+                    clean_sender = sender_name.lower().replace('_', ' ')
+                    clean_key = key.lower().replace('_', ' ')
+                    
+                    if clean_sender in clean_key or clean_key in clean_sender:
+                        # Calculate match score based on common parts
+                        sender_parts = set(clean_sender.split())
+                        key_parts = set(clean_key.split())
+                        common_parts = sender_parts.intersection(key_parts)
+                        match_score = len(common_parts) / max(len(sender_parts), len(key_parts))
+                        
+                        if match_score > best_match_score:
+                            best_match = key
+                            best_match_score = match_score
+                
+                if best_match:
+                    message_content = message_content_by_sender[best_match]
+                    print(f"✓ Found partial match for message content with key: {best_match}")
+                    print(f"  Match quality: {best_match_score:.2f} (higher is better)")
             
-            # If still no match, try looking for the name in the keys
-            if not message_content:
-                print("No case-insensitive match found, trying partial name match...")
-                for key in message_content_by_sender.keys():
-                    if sender_name.lower() in key.lower() or key.lower() in sender_name.lower():
-                        message_content = message_content_by_sender[key]
-                        print(f"Found message content using partial name match: {key}")
-                        break
-            
-            # If still no match, use the first name from the resume sender as fallback
-            if not message_content and "_" in sender_name:
-                print("Trying first name match...")
-                first_name = sender_name.split("_")[0]
-                for key in message_content_by_sender.keys():
-                    if first_name.lower() in key.lower():
-                        message_content = message_content_by_sender[key]
-                        print(f"Found message content using first name match: {key}")
-                        break
-            
-            # Try name parts match
+            # Try name parts match if we still don't have a match
             if not message_content:
                 print("Trying name parts match...")
                 # Convert underscores in sender_name to spaces for comparison
                 sender_parts = sender_name.replace("_", " ").lower().split()
+                best_match = None
+                best_match_count = 0
+                
                 for key in message_content_by_sender.keys():
                     key_parts = key.replace("_", " ").lower().split()
-                    if any(part in key_parts for part in sender_parts):
-                        message_content = message_content_by_sender[key]
-                        print(f"Found message content using name parts match: {key}")
-                        break
+                    # Count how many parts match
+                    matching_parts = sum(1 for part in sender_parts if part in key_parts)
+                    if matching_parts > best_match_count:
+                        best_match = key
+                        best_match_count = matching_parts
+                
+                if best_match and best_match_count > 0:
+                    message_content = message_content_by_sender[best_match]
+                    print(f"✓ Found name parts match with key: {best_match}")
+                    print(f"  Matching parts: {best_match_count}")
             
             if not message_content:
-                print(f"WARNING: No message content found for {sender_name}")
+                print(f"❌ WARNING: No message content found for {sender_name}")
             
             # Extract text from PDF
+            print("-" * 40)
+            print("PDF TEXT EXTRACTION")
+            print("-" * 40)
             resume_text = extract_text_from_pdf(resume_file)
             
             if not resume_text:
-                print(f"Could not extract text from {resume_file}")
+                print(f"❌ Could not extract text from {resume_file}")
                 continue
+            else:
+                print(f"✓ Successfully extracted {len(resume_text)} characters from PDF")
                 
             # Analyze resume with GPT
+            print("-" * 40)
+            print("GPT ANALYSIS")
+            print("-" * 40)
             print(f"Sending resume to Azure OpenAI for analysis...")
-            analysis = analyze_resume_with_gpt(resume_text, sender_name, message_content)
+            analysis = analyze_resume_with_gpt(resume_text, sender_name, message_content, os.path.basename(resume_file))
+            
+            print("-" * 40)
+            print("ANALYSIS RESULTS")
+            print("-" * 40)
+            print(f"Name: {analysis.get('name', 'Not found')}")
+            print(f"Email: {analysis.get('email', 'Not found')}")
+            print(f"Phone: {analysis.get('phone', 'Not found')}")
+            print(f"Experience: {analysis.get('years_of_experience', 'Not found')} years")
+            print(f"Job ID: {analysis.get('job_id', 'Not found')}")
             
             # Add to our analyses list
             analyses.append(analysis)
+            print(f"✓ Added to Excel report queue")
             
             # Wait a bit to avoid rate limits
             time.sleep(1)
         
         if not analyses:
+            print("\n" + "=" * 60)
+            print("ERROR: NO ANALYSES COMPLETED")
+            print("=" * 60)
             print("No resume analyses were completed.")
             return False
         
         # Create Excel file with analyses
+        print("\n" + "=" * 60)
+        print("CREATING EXCEL REPORT")
+        print("=" * 60)
         create_excel_report(analyses)
         return True
         
     except Exception as e:
-        print(f"Error processing LinkedIn messages: {str(e)}")
+        print("\n" + "=" * 60)
+        print("ERROR PROCESSING MESSAGES")
+        print("=" * 60)
+        print(f"Error: {str(e)}")
         return False
 
 def create_excel_report(analyses):
     """Create an Excel report with resume analyses."""
     try:
         # Print received analyses for debugging
-        print(f"\nCreating Excel report with {len(analyses)} analyses")
+        print(f"Creating Excel report with {len(analyses)} analyses")
+        print("-" * 40)
+        print("DATA FOR EXCEL REPORT")
+        print("-" * 40)
         for i, analysis in enumerate(analyses):
-            print(f"Analysis {i+1}: {analysis}")
+            print(f"Entry {i+1}:")
+            print(f"  Name: {analysis.get('name', 'Not found')}")
+            print(f"  Email: {analysis.get('email', 'Not found')}")
+            print(f"  Job ID: {analysis.get('job_id', 'Not found')}")
         
         # Create DataFrame
+        print("\nCreating DataFrame...")
         df = pd.DataFrame(analyses)
         
         # Debug column names
@@ -643,6 +706,7 @@ def create_excel_report(analyses):
         df = df[required_columns]
         
         # Create a styled Excel file
+        print("\nFormatting Excel workbook...")
         wb = Workbook()
         ws = wb.active
         
@@ -660,6 +724,7 @@ def create_excel_report(analyses):
             cell.alignment = Alignment(horizontal="center", vertical="center")
         
         # Add data
+        print("Adding data rows...")
         for analysis in analyses:
             ws.append([
                 analysis.get("name", "Not found"),
@@ -670,6 +735,7 @@ def create_excel_report(analyses):
             ])
         
         # Auto-adjust column width
+        print("Adjusting column widths...")
         for column in ws.columns:
             max_length = 0
             column_letter = column[0].column_letter
@@ -681,14 +747,14 @@ def create_excel_report(analyses):
         
         # Save the workbook with the new name
         excel_file = "linkedin_referrals.xlsx"
+        print(f"Saving Excel file to {excel_file}...")
         wb.save(excel_file)
-        print(f"Saved Excel report to {excel_file}")
+        print(f"✅ Saved Excel report to {excel_file}")
         
-        print("Excel report created successfully!")
+        print("✅ Excel report created successfully!")
         return True
-        
     except Exception as e:
-        print(f"Error creating Excel report: {str(e)}")
+        print(f"❌ Error creating Excel report: {str(e)}")
         return False
 
 if __name__ == "__main__":
